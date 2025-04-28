@@ -1321,6 +1321,63 @@ if (isset($_POST['unzip'], $_POST['token']) && !FM_READONLY) {
     fm_redirect(FM_SELF_URL . '?p=' . urlencode($FM_PATH));
 }
 
+// Decompress GZ
+if (isset($_POST['gunzip'], $_POST['token']) && !FM_READONLY) {
+    if (!verifyToken($_POST['token'])) {
+        fm_set_msg(lng("Invalid Token."), 'error');
+    }
+
+    $file = fm_clean_path($_POST['gunzip']);
+    $file_path = FM_ROOT_PATH . '/' . FM_PATH . '/' . $file;
+
+    if (pathinfo($file_path, PATHINFO_EXTENSION) !== 'gz') {
+        fm_set_msg(lng('Invalid file type'), 'error');
+        fm_redirect(FM_SELF_URL . '?p=' . urlencode(FM_PATH));
+    }
+
+    // Custom gzip decompression function
+    $result = fm_decompress_gz($file_path);
+
+    if ($result === true) {
+        fm_set_msg(lng('File decompressed successfully'));
+        // Check if result is tar and extract
+        $decompressed_file = substr($file_path, 0, -3);
+        if (pathinfo($decompressed_file, PATHINFO_EXTENSION) === 'tar') {
+            $phar = new PharData($decompressed_file);
+            $phar->extractTo(FM_ROOT_PATH . '/' . FM_PATH);
+            unlink($decompressed_file);
+        }
+    } else {
+        fm_set_msg($result, 'error');
+    }
+
+    fm_redirect(FM_SELF_URL . '?p=' . urlencode(FM_PATH));
+}
+
+// GZ decompression function
+function fm_decompress_gz($gz_path) {
+    $buffer_size = 4096;
+    $output_path = substr($gz_path, 0, -3);
+
+    if (!function_exists('gzopen')) {
+        return 'Zlib extension not available';
+    }
+
+    $gz = gzopen($gz_path, 'rb');
+    if (!$gz) return 'Cannot open gz file';
+
+    $out = fopen($output_path, 'wb');
+    if (!$out) return 'Cannot create output file';
+
+    while (!gzeof($gz)) {
+        fwrite($out, gzread($gz, $buffer_size));
+    }
+
+    fclose($out);
+    gzclose($gz);
+    return true;
+}
+
 // Change Perms (not for Windows)
 if (isset($_POST['chmod'], $_POST['token']) && !FM_READONLY && !FM_IS_WIN) {
 
@@ -1848,6 +1905,9 @@ if (isset($_GET['view'])) {
         $is_zip = true;
         $view_title = 'Archive';
         $filenames = fm_get_zif_info($file_path, $ext);
+    } elseif ($ext == 'gz') {
+        $is_gzip = true;
+        $view_title = 'GZip Compressed File';
     } elseif (in_array($ext, fm_get_image_exts())) {
         $is_image = true;
         $view_title = 'Image';
@@ -1874,7 +1934,7 @@ if (isset($_GET['view'])) {
                 <li class="list-group-item"><strong><?php echo lng('MIME-type') ?>:</strong> <?php echo $mime_type ?></li>
                 <?php
                 // ZIP info
-                if (($is_zip || $is_gzip) && $filenames !== false) {
+                if ($is_zip && $filenames !== false) {
                     $total_files = 0;
                     $total_comp = 0;
                     $total_uncomp = 0;
@@ -1920,7 +1980,7 @@ if (isset($_GET['view'])) {
                 <a class="fw-bold btn btn-outline-primary" href="<?php echo fm_enc($file_url) ?>" target="_blank"><i class="fa fa-external-link-square"></i> <?php echo lng('Open') ?></a></b>
                 <?php
                 // ZIP actions
-                if (!FM_READONLY && ($is_zip || $is_gzip) && $filenames !== false) {
+                if (!FM_READONLY && $is_zip && $filenames !== false) {
                     $zip_name = pathinfo($file_path, PATHINFO_FILENAME);
                 ?>
                     <form method="post" class="d-inline btn btn-outline-primary mb-0">
@@ -1933,6 +1993,17 @@ if (isset($_GET['view'])) {
                         <input type="hidden" name="unzip" value="<?php echo urlencode($file); ?>">
                         <input type="hidden" name="tofolder" value="1">
                         <button type="submit" class="btn btn-link text-decoration-none fw-bold p-0" style="font-size: 14px;" title="UnZip to <?php echo fm_enc($zip_name) ?>"><i class="fa fa-check-circle"></i> <?php echo lng('UnZipToFolder') ?></button>
+                    </form>
+                    <?php
+                }
+                // GZIP actions
+                if (!FM_READONLY && $is_gzip) {
+                    $zip_name = pathinfo($file_path, PATHINFO_FILENAME);
+                    ?>
+                    <form method="post" class="d-inline btn btn-outline-primary mb-0">
+                        <input type="hidden" name="token" value="<?php echo $_SESSION['token']; ?>">
+                        <input type="hidden" name="gunzip" value="<?php echo urlencode($file); ?>">
+                        <button type="submit" class="btn btn-link text-decoration-none fw-bold p-0 border-0" style="font-size: 14px;"><i class="fa fa-check-circle"></i> <?php echo lng('Decompress GZ') ?></button>
                     </form>
                 <?php
                 }
